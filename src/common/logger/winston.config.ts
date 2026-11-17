@@ -1,9 +1,7 @@
 import * as winston from 'winston';
 import * as path from 'path';
 import * as fs from 'fs';
-import { createRequire } from 'module';
 
-const require = createRequire(import.meta.url);
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
 const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
@@ -40,6 +38,7 @@ if (!isServerless) {
       fs.mkdirSync(logDir, { recursive: true });
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('winston-daily-rotate-file');
 
     transports.push(
