@@ -25,41 +25,7 @@ async function bootstrap() {
     expressApp.set('trust proxy', 1);
   }
 
-  // Security headers (disable strict CSP so Swagger UI loads cleanly)
-  app.use(
-    helmet({
-      contentSecurityPolicy: false,
-      crossOriginEmbedderPolicy: false,
-    }),
-  );
-
-  // Gzip compression for high-performance payload delivery
-  app.use(compression());
-
-  // Global API routing prefix with exclusion for root and Swagger docs
-  app.setGlobalPrefix('api', {
-    exclude: ['/', 'docs', 'docs/(.*)'],
-  });
-
-  // Request validation pipe with automatic transformation
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: false,
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
-    }),
-  );
-
-  // Global HTTP request/response latency logging
-  app.useGlobalInterceptors(new LoggingInterceptor());
-
-  // Global Exception filter with structured JSON and rolling error logs
-  app.useGlobalFilters(new AllExceptionsFilter());
-
-  // Dynamic CORS configuration for local dev, production domain, and Vercel QA previews
+  // 1. Dynamic CORS configuration (enabled first so preflights resolve cleanly)
   const defaultOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
@@ -76,31 +42,74 @@ async function bootstrap() {
 
   app.enableCors({
     origin: (origin, callback) => {
-      // Allow server-to-server, curl, mobile apps, or same-origin requests with no origin header
+      // Allow requests with no origin (mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
 
-      // Check allowed list
-      if (allowedOrigins.includes(origin)) {
+      const normalizedOrigin = origin.replace(/\/$/, '');
+
+      if (
+        allowedOrigins.includes(normalizedOrigin) ||
+        normalizedOrigin.endsWith('.vercel.app') ||
+        normalizedOrigin.includes('textgenerators.net')
+      ) {
         return callback(null, true);
       }
 
-      // Automatically allow Vercel QA preview deployments (*.vercel.app)
-      if (origin && origin.endsWith('.vercel.app')) {
-        return callback(null, true);
-      }
-
-      callback(new Error(`Origin ${origin} not allowed by CORS`));
+      logger.warn(`Blocked CORS request from origin: ${origin}`);
+      callback(null, false);
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
       'Cookie',
       'X-Requested-With',
       'Accept',
+      'Origin',
+      'DNT',
+      'sec-ch-ua',
+      'sec-ch-ua-mobile',
+      'sec-ch-ua-platform',
     ],
+    exposedHeaders: ['Authorization', 'Set-Cookie'],
+    optionsSuccessStatus: 204,
   });
+
+  // 2. Security headers (allow cross-origin resource access for frontend requests)
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
+
+  // 3. Gzip compression for high-performance payload delivery
+  app.use(compression());
+
+  // 4. Global API routing prefix with exclusion for root and Swagger docs
+  app.setGlobalPrefix('api', {
+    exclude: ['/', 'docs', 'docs/(.*)'],
+  });
+
+  // 5. Request validation pipe with automatic transformation
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: false,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    }),
+  );
+
+  // 6. Global HTTP request/response latency logging
+  app.useGlobalInterceptors(new LoggingInterceptor());
+
+  // 7. Global Exception filter with structured JSON and rolling error logs
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // Interactive Swagger / OpenAPI Specification
   const swaggerConfig = new DocumentBuilder()
