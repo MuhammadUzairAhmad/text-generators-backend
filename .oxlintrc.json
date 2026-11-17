@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "rules": {
+    "typescript/no-explicit-any": "off",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-useless-default-assignment": "off",
+    "typescript/no-misused-spread": "off",
+    "typescript/restrict-template-expressions": "off",
+    "typescript/no-base-to-string": "off"
+  },
+  "env": {
+    "node": true
+  }
+}
