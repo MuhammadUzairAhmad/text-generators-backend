@@ -2,11 +2,5 @@
   "version": 2,
   "env": {
     "NODE_OPTIONS": "--experimental-require-module"
-  },
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/src/main.ts"
-    }
-  ]
+  }
 }
