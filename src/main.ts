@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger, INestApplication } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { WinstonModule } from 'nest-winston';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -10,11 +10,15 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AuthService } from './modules/auth/auth.service';
 
-/**
- * Configure shared NestJS application middleware, CORS, pipes, Swagger, and filters.
- * Shared across standalone server (Oracle Cloud/PM2) and Vercel serverless.
- */
-export function configureApp(app: INestApplication): void {
+async function bootstrap() {
+  const loggerInstance = WinstonModule.createLogger(winstonConfig);
+
+  const app = await NestFactory.create(AppModule, {
+    logger: loggerInstance,
+  });
+
+  const logger = new Logger('Bootstrap');
+
   // Trust first proxy (Nginx / Vercel Edge) for accurate client IP detection
   const expressApp = app.getHttpAdapter().getInstance();
   if (expressApp && typeof expressApp.set === 'function') {
@@ -32,8 +36,10 @@ export function configureApp(app: INestApplication): void {
   // Gzip compression for high-performance payload delivery
   app.use(compression());
 
-  // Global API routing prefix
-  app.setGlobalPrefix('api');
+  // Global API routing prefix with exclusion for root and Swagger docs
+  app.setGlobalPrefix('api', {
+    exclude: ['/', 'docs', 'docs/(.*)'],
+  });
 
   // Request validation pipe with automatic transformation
   app.useGlobalPipes(
@@ -53,7 +59,7 @@ export function configureApp(app: INestApplication): void {
   // Global Exception filter with structured JSON and rolling error logs
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  // Dynamic CORS configuration
+  // Dynamic CORS configuration for local dev, production domain, and Vercel QA previews
   const defaultOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
@@ -70,9 +76,19 @@ export function configureApp(app: INestApplication): void {
 
   app.enableCors({
     origin: (origin, callback) => {
+      // Allow server-to-server, curl, mobile apps, or same-origin requests with no origin header
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      if (origin && origin.endsWith('.vercel.app')) return callback(null, true);
+
+      // Check allowed list
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // Automatically allow Vercel QA preview deployments (*.vercel.app)
+      if (origin && origin.endsWith('.vercel.app')) {
+        return callback(null, true);
+      }
+
       callback(new Error(`Origin ${origin} not allowed by CORS`));
     },
     credentials: true,
@@ -104,6 +120,7 @@ export function configureApp(app: INestApplication): void {
       },
       'bearer',
     )
+    .addTag('Root', 'API root status and health checks')
     .addTag('Authentication', 'Admin login, session check, and credentials')
     .addTag('Blogs', 'Public article delivery and CMS administration')
     .addTag('Comments', 'Public commenting and moderation')
@@ -114,26 +131,23 @@ export function configureApp(app: INestApplication): void {
     .build();
 
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+
+  // Serve Swagger UI using CDN assets to avoid missing static files in Vercel serverless
   SwaggerModule.setup('docs', app, swaggerDocument, {
     customSiteTitle: 'TextGenerators API Documentation',
+    customCssUrl: [
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.9.0/swagger-ui.min.css',
+    ],
+    customJs: [
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.9.0/swagger-ui-bundle.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.9.0/swagger-ui-standalone-preset.js',
+    ],
     swaggerOptions: {
       persistAuthorization: true,
       docExpansion: 'list',
       filter: true,
     },
   });
-}
-
-async function bootstrap() {
-  const loggerInstance = WinstonModule.createLogger(winstonConfig);
-
-  const app = await NestFactory.create(AppModule, {
-    logger: loggerInstance,
-  });
-
-  const logger = new Logger('Bootstrap');
-
-  configureApp(app);
 
   // Seed default super-admin if database has no users
   try {
@@ -143,6 +157,7 @@ async function bootstrap() {
     logger.warn(`Admin seeding skipped: ${(err as Error).message}`);
   }
 
+  // Vercel injects process.env.PORT automatically; defaults to 4000 locally
   const port = process.env.PORT || 4000;
   await app.listen(port);
 
@@ -154,7 +169,4 @@ async function bootstrap() {
   logger.log(`=======================================================`);
 }
 
-// Only start standalone HTTP server when executed directly (not when required by Vercel serverless)
-if (!process.env.VERCEL) {
-  void bootstrap();
-}
+void bootstrap();
